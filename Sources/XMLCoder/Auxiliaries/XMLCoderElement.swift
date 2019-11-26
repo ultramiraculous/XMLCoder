@@ -23,46 +23,101 @@ struct XMLCoderElement: Equatable {
     ]
 
     let key: String
-    private(set) var value: String?
+    private(set) var stringValue: String?
     private(set) var elements: [XMLCoderElement] = []
     private(set) var attributes: [Attribute] = []
+    private(set) var containsTextNodes: Bool = false
+    
+    var isStringNode: Bool {
+        return key == "#PCDATA"
+    }
+    
+    var isCDATANode: Bool {
+        return key == "#CDATA"
+    }
+    
+    var isTextNode: Bool {
+        return isStringNode || isCDATANode
+    }
 
     init(
         key: String,
-        value: String? = nil,
         elements: [XMLCoderElement] = [],
         attributes: [Attribute] = []
     ) {
         self.key = key
-        self.value = value
+        self.stringValue = nil
         self.elements = elements
         self.attributes = attributes
     }
-
-    mutating func append(value string: String) {
-        guard value != nil else {
-            value = string
-            return
-        }
-        value?.append(string)
+    
+    init(
+        key: String,
+        stringValue string: String,
+        attributes: [Attribute] = []) {
+        self.key = key
+        self.elements = [XMLCoderElement(stringValue: string)]
+        self.attributes = attributes
+        containsTextNodes = true
+    }
+    
+    init(
+        key: String,
+        cdataValue string: String,
+        attributes: [Attribute] = []) {
+        self.key = key
+        self.elements = [XMLCoderElement(cdataValue: string)]
+        self.attributes = attributes
+        containsTextNodes = true
+    }
+    
+    init(stringValue string: String) {
+        self.key = "#PCDATA"
+        self.stringValue = string
+    }
+    
+    init(cdataValue string: String) {
+        self.key = "#CDATA"
+        self.stringValue = string
     }
 
     mutating func append(element: XMLCoderElement, forKey key: String) {
         elements.append(element)
+        containsTextNodes = containsTextNodes || element.isTextNode
+    }
+    
+    mutating func append(string: String) {
+        if elements.last?.isTextNode == true {
+            let oldValue = elements[elements.count - 1].stringValue ?? ""
+            elements[elements.count - 1].stringValue = oldValue + string
+        } else {
+            elements.append(XMLCoderElement(stringValue: string))
+        }
+        containsTextNodes = true
+    }
+    
+    mutating func append(cdata string: String) {
+        if elements.last?.isCDATANode == true {
+            let oldValue = elements[elements.count - 1].stringValue ?? ""
+            elements[elements.count - 1].stringValue = oldValue + string
+        } else {
+            elements.append(XMLCoderElement(cdataValue: string))
+        }
+        containsTextNodes = true
     }
 
-    func transformToBoxTree() -> KeyedBox {
+    func transformToBoxTree() -> Box {
+        if isStringNode {
+            return StringBox(stringValue!)
+        } else if isCDATANode {
+            return StringBox("![CDATA[\(stringValue!)")
+        }
+        
         let attributes = KeyedStorage(self.attributes.map { attribute in
             (key: attribute.key, value: StringBox(attribute.value) as SimpleBox)
         })
         let storage = KeyedStorage<String, Box>()
-        var elements = self.elements.reduce(storage) { $0.merge(element: $1) }
-
-        // Handle attributed unkeyed value <foo attr="bar">zap</foo>
-        // Value should be zap. Detect only when no other elements exist
-        if elements.isEmpty, let value = value {
-            elements.append(StringBox(value), at: "")
-        }
+        let elements = self.elements.reduce(storage) { $0.merge(element: $1) }
         return KeyedBox(elements: elements, attributes: attributes)
     }
 
@@ -100,6 +155,10 @@ struct XMLCoderElement: Equatable {
         formatting: XMLEncoder.OutputFormatting,
         prettyPrinted: Bool
     ) -> String {
+        if let stringValue = element.stringValue {
+            return stringValue
+        }
+        
         var string = ""
         string += element._toXMLString(
             indented: level + 1, withCDATA: cdata, formatting: formatting
@@ -149,7 +208,7 @@ struct XMLCoderElement: Equatable {
                                     at: level,
                                     cdata: cdata,
                                     formatting: formatting,
-                                    prettyPrinted: prettyPrinted)
+                                    prettyPrinted:  (prettyPrinted && !containsTextNodes))
         }
     }
 
@@ -201,33 +260,23 @@ struct XMLCoderElement: Equatable {
         let prettyPrinted = formatting.contains(.prettyPrinted)
         let indentation = String(
             repeating: " ", count: (prettyPrinted ? level : 0) * 4
-        )
+        )        
         var string = indentation
+        
         if !key.isEmpty {
             string += "<\(key)"
         }
 
         formatXMLAttributes(formatting, &string)
 
-        if let value = value {
+        if !elements.isEmpty {
+            let prettyPrintElements = prettyPrinted && !containsTextNodes
             if !key.isEmpty {
-                string += ">"
+                string += prettyPrintElements ? ">\n" : ">"
             }
-            if !ignoreEscaping {
-                string += (cdata == true ? "<![CDATA[\(value)]]>" :
-                    "\(value.escape(XMLCoderElement.escapedCharacterSet))")
-            } else {
-                string += "\(value)"
-            }
+            formatXMLElements(formatting, &string, level, cdata, prettyPrintElements)
 
-            if !key.isEmpty {
-                string += "</\(key)>"
-            }
-        } else if !elements.isEmpty {
-            string += prettyPrinted ? ">\n" : ">"
-            formatXMLElements(formatting, &string, level, cdata, prettyPrinted)
-
-            string += indentation
+            if prettyPrintElements { string += indentation }
             if !key.isEmpty {
                 string += "</\(key)>"
             }
@@ -298,8 +347,7 @@ extension XMLCoderElement {
     }
 
     init(key: String, box: SimpleBox) {
-        self.init(key: key)
-        value = box.xmlString
+        self.init(key: key, stringValue: box.xmlString ?? "")
     }
 
     init(key: String, box: Box) {

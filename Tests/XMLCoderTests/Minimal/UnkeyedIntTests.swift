@@ -137,7 +137,7 @@ struct UnkeyedContainerUInt64: Codable, Equatable, IntegerArrayContainer {
 }
 
 class UnkeyedIntTests: XCTestCase {
-    func testInt<T: Codable & IntegerArrayContainer>(_ type: T.Type) throws {
+    func testInt<T: Codable & IntegerArrayContainer>(_ type: T.Type, line: UInt = #line, file: StaticString = #file) throws {
         let decoder = XMLDecoder()
         let encoder = XMLEncoder()
         encoder.outputFormatting = [.prettyPrinted]
@@ -154,10 +154,10 @@ class UnkeyedIntTests: XCTestCase {
         let xmlData = xmlString.data(using: .utf8)!
 
         let decoded = try decoder.decode(type, from: xmlData)
-        XCTAssertEqual(decoded.intValue, [42, 43, 44])
+        XCTAssertEqual(decoded.intValue, [42, 43, 44], file: file, line: line)
 
         let encoded = try encoder.encode(decoded, withRootKey: "container")
-        XCTAssertEqual(String(data: encoded, encoding: .utf8)!, xmlString)
+        XCTAssertEqual(String(data: encoded, encoding: .utf8)!, xmlString, file: file, line: line)
     }
 
     func testInts() throws {
