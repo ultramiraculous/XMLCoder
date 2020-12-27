@@ -403,8 +403,8 @@ open class XMLEncoder {
         return element.toXMLString(
             with: header,
             escapedCharacters: (
-                attributes: charactersEscapedInAttributes,
-                elements: charactersEscapedInElements
+                elements: charactersEscapedInElements,
+                attributes: charactersEscapedInAttributes
             ),
             formatting: outputFormatting,
             indentation: prettyPrintIndentation
